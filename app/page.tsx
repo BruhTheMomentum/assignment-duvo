@@ -44,6 +44,7 @@ export default function Home() {
 				content: userMessage,
 				steps: [],
 				csv: null,
+				evaluation: null,
 				timestamp: now,
 			};
 			const assistantMsg: ChatMessage = {
@@ -52,6 +53,7 @@ export default function Home() {
 				content: state.error ?? state.response,
 				steps: state.steps,
 				csv: state.csv,
+				evaluation: state.evaluation,
 				timestamp: now + 1,
 			};
 

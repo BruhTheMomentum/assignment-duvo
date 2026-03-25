@@ -15,6 +15,7 @@ export type ChatMessage = {
 	content: string;
 	steps: Step[];
 	csv: { filename: string; content: string } | null;
+	evaluation: Evaluation | null;
 	timestamp: number;
 };
 
@@ -26,9 +27,31 @@ export type ChatSession = {
 	updatedAt: number;
 };
 
+export type SelfEvaluation = {
+	status: "complete" | "partial" | "failed";
+	summary: string;
+	issues: string[];
+	confidence: number;
+};
+
+export type JudgeEvaluation = {
+	verdict: "pass" | "partial" | "fail";
+	score: number;
+	reasoning: string;
+	gaps: string[];
+};
+
+export type Evaluation = {
+	self: SelfEvaluation | null;
+	judge: JudgeEvaluation | null;
+	selfEvalSkipped: boolean;
+	judgeError: string | null;
+};
+
 export type ChatState = {
 	response: string;
 	error: string | null;
 	csv: { filename: string; content: string } | null;
 	steps: Step[];
+	evaluation: Evaluation | null;
 };

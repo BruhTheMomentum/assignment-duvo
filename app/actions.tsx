@@ -6,9 +6,36 @@ import {
 	tool,
 } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod/v4";
+import { cookies } from "next/headers";
 import type { ChatState, Step } from "@/app/types";
+import {
+	getTokenPath,
+	getOAuthCredentialsPath,
+	fileExists,
+	ensureOAuthCredentialsFile,
+	getUserTokens,
+	deleteUserTokens,
+} from "@/app/lib/google-auth";
 
 const MAX_MESSAGE_LENGTH = 10_000;
+
+export async function getGoogleStatus(): Promise<{ connected: boolean }> {
+	const cookieStore = await cookies();
+	const userId = cookieStore.get("userId")?.value;
+	if (!userId) return { connected: false };
+
+	const tokens = await getUserTokens(userId);
+	return { connected: tokens !== null };
+}
+
+export async function disconnectGoogle(): Promise<{ success: boolean }> {
+	const cookieStore = await cookies();
+	const userId = cookieStore.get("userId")?.value;
+	if (!userId) return { success: false };
+
+	await deleteUserTokens(userId);
+	return { success: true };
+}
 
 function extractStepsFromContent(
 	content: unknown[],
@@ -69,6 +96,7 @@ export async function chat(
 			error: "Message cannot be empty",
 			csv: null,
 			steps: [],
+			evaluation: null,
 		};
 	}
 
@@ -80,6 +108,7 @@ export async function chat(
 			error: `Message too long (max ${MAX_MESSAGE_LENGTH} characters)`,
 			csv: null,
 			steps: [],
+			evaluation: null,
 		};
 	}
 
@@ -126,32 +155,63 @@ export async function chat(
 			],
 		});
 
+		const mcpServers: Record<string, unknown> = {
+			"csv-tools": csvServer,
+		};
+
+		const systemPromptLines = [
+			"You have tools available:",
+			"- WebFetch: fetch content from URLs",
+			"- save_csv: export data as a downloadable CSV file",
+			"",
+			"When asked to fetch data and export to CSV:",
+			"1. Use WebFetch to retrieve the data",
+			"2. Parse the response into a flat table structure",
+			"3. Call save_csv with:",
+			"   - filename: descriptive name ending in .csv",
+			"   - headers: array of column names",
+			"   - rows: array of arrays, each cell as a string",
+			"4. Convert all values to strings (numbers, booleans, nested objects)",
+			"5. Flatten nested JSON by using dot notation for column names (e.g. address.city)",
+			"",
+			"Never output raw CSV text. Always use save_csv.",
+		];
+
+		const allowedTools = ["WebFetch", "mcp__csv-tools__save_csv"];
+
+		const cookieStore = await cookies();
+		const userId = cookieStore.get("userId")?.value;
+
+		if (userId) {
+			const tokenPath = getTokenPath(userId);
+			const hasTokens = await fileExists(tokenPath);
+			if (hasTokens) {
+				await ensureOAuthCredentialsFile();
+				mcpServers["google-drive"] = {
+					command: "npx",
+					args: ["-y", "@piotr-agier/google-drive-mcp"],
+					env: {
+						GOOGLE_DRIVE_OAUTH_CREDENTIALS: getOAuthCredentialsPath(),
+						GOOGLE_DRIVE_MCP_TOKEN_PATH: tokenPath,
+					},
+				};
+				systemPromptLines.push(
+					"",
+					"You also have access to Google Drive, Docs, Sheets, Slides, and Calendar tools.",
+					"Use these when the user asks to interact with their Google Workspace.",
+				);
+			}
+		}
+
 		const q = query({
 			prompt: message,
 			options: {
-				systemPrompt: [
-					"You have two tools:",
-					"- WebFetch: fetch content from URLs",
-					"- save_csv: export data as a downloadable CSV file",
-					"",
-					"When asked to fetch data and export to CSV:",
-					"1. Use WebFetch to retrieve the data",
-					"2. Parse the response into a flat table structure",
-					"3. Call save_csv with:",
-					"   - filename: descriptive name ending in .csv",
-					"   - headers: array of column names",
-					"   - rows: array of arrays, each cell as a string",
-					"4. Convert all values to strings (numbers, booleans, nested objects)",
-					"5. Flatten nested JSON by using dot notation for column names (e.g. address.city)",
-					"",
-					"Never output raw CSV text. Always use save_csv.",
-				].join("\n"),
-				allowedTools: ["WebFetch", "mcp__csv-tools__save_csv"],
+				systemPrompt: systemPromptLines.join("\n"),
+				allowedTools,
 				maxTurns: 5,
 				persistSession: false,
-				mcpServers: {
-					"csv-tools": csvServer,
-				},
+				// eslint-disable-next-line @typescript-eslint/no-explicit-any
+				mcpServers: mcpServers as any,
 			},
 		});
 
@@ -176,7 +236,13 @@ export async function chat(
 				}
 			} else if (msg.type === "result") {
 				if (msg.subtype === "success") {
-					return { response: msg.result, error: null, csv: capturedCsv, steps };
+					return {
+						response: msg.result,
+						error: null,
+						csv: capturedCsv,
+						steps,
+						evaluation: null,
+					};
 				}
 
 				return {
@@ -187,11 +253,18 @@ export async function chat(
 							: "An error occurred",
 					csv: null,
 					steps,
+					evaluation: null,
 				};
 			}
 		}
 
-		return { response: "", error: "No response received", csv: null, steps };
+		return {
+			response: "",
+			error: "No response received",
+			csv: null,
+			steps,
+			evaluation: null,
+		};
 	} catch (error) {
 		console.error("Chat action failed:", error);
 		return {
@@ -199,6 +272,7 @@ export async function chat(
 			error: "Something went wrong. Please try again.",
 			csv: null,
 			steps: [],
+			evaluation: null,
 		};
 	}
 }

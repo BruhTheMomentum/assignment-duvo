@@ -6,12 +6,14 @@ import type { ChatState, ChatMessage, ChatSession } from "@/app/types";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { StepTimeline } from "@/app/components/step-timeline";
+import { GoogleConnect } from "@/app/components/google-connect";
 
 const initialState: ChatState = {
 	response: "",
 	error: null,
 	csv: null,
 	steps: [],
+	evaluation: null,
 };
 
 function MessageBubble({ message }: { message: ChatMessage }) {
@@ -190,6 +192,11 @@ export function Chat({
 					</button>
 				</div>
 			)}
+
+			{/* Integrations */}
+			<div className="flex items-center gap-3">
+				<GoogleConnect />
+			</div>
 
 			{/* Input */}
 			<form
